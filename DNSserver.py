@@ -176,8 +176,8 @@ def refresh_root_server(server="172.18.1.92", site="cra.moe"):
     msg_rev, _ = server_socket.recvfrom(2048)
 
     a = DNSRecord.parse(msg_rev)
-    auth_zone = "\n".join([rr.toZone() for rr in a.root_auth])
-    ar_zone = "\n".join([rr.toZone() for rr in a.root_ar])
+    auth_zone = "\n".join([rr.toZone() for rr in a.auth])
+    ar_zone = "\n".join([rr.toZone() for rr in a.ar])
     with open("ROOTServer.json", "w") as f:
         f.write(json.dumps(dict(auth_zone=auth_zone, ar_zone=ar_zone)))
 
@@ -216,7 +216,6 @@ def main():
                 [reply.add_auth(rr) for rr in upstream_resp.auth]
                 [reply.add_ar(rr) for rr in upstream_resp.ar]
                 cache.write_cache(reply)
-            print(reply.a.toZone())
             server_socket.sendto(reply.pack(), client_address)
 
 
