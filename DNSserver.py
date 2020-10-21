@@ -44,7 +44,7 @@ from dnslib import DNSRecord, DNSQuestion, RR, QTYPE, DNSError
     
     Set this flag to ``False`` can disable NS_address parsing, to make system output nice and simple.
 '''
-FLAG_TS_ITER = False
+FLAG_TS_ITER = True
 
 
 class DNSCache(object):
@@ -132,8 +132,11 @@ class TargetServer(object):
             new_query = DNSRecord(header=self.query.header)
             new_query.add_question(DNSQuestion(qname))
             result = iter_query(new_query).a
-            if result.rtype == QTYPE.A:
-                yield result.rdata.toZone()
+            try:
+                if result.rtype == QTYPE.A:
+                    yield result.rdata.toZone()
+            except:
+                continue
 
 
 def get_root_server():
@@ -256,7 +259,7 @@ def iter_query(query):
         for target in ts:
             print("\tQuery {} from {}".format(qname, target))
             cur_resp = dns_send(cur_query, target)
-            if cur_resp:
+            if cur_resp.a.rdata:
                 break
             else:
                 print("\t\tTime out, reset target upper stream.")
