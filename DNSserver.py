@@ -33,6 +33,12 @@ from dnslib import DNSRecord, DNSQuestion, RR, QTYPE, DNSError
 # FLAG SETTING
 
 '''
+    Set the PORT to 53 and try set DNS server as your default DNS server.
+    It should work just fine.
+'''
+PORT = 12000
+
+'''
     FLAG_TS_ITER is used to set whether NS record should be parsed by our DNS server.
     For example, we got no A records but several NS records (e.g. ns1.dnspod.com) from somewhere,
     and we can choose to:
@@ -186,40 +192,59 @@ def refresh_root_server(server="172.18.1.92", site="cra.moe"):
 
 
 server_socket = socket(AF_INET, SOCK_DGRAM)
-server_socket.bind(('', 53))  # Set up UDP server at port 53
+server_socket.bind(('', PORT))
 cache = DNSCache()
 root_auth, root_ar = get_root_server()
 
 
 def main():
     while True:
-        message, client_address = server_socket.recvfrom(2048)
-        query = DNSRecord.parse(message)  # parsed DNS Record
-        print("Get DNS request from {0}".format(client_address[0]))
+        try:
+            message, client_address = server_socket.recvfrom(2048)
+            query = DNSRecord.parse(message)  # parsed DNS Record
+            print("Get DNS request from {0}".format(client_address[0]))
 
-        rd = query.header.get_rd()
-        print("\tRequesting for {0}, Type {1}, RD={2}".format(query.q.qname, query.q.qtype, rd))
+            rd = query.header.get_rd()
+            print("\tRequesting for {0}, Type {1}, RD={2}".format(query.q.qname, query.q.qtype, rd))
 
-        reply = cache.read_cache(query)
-        if reply is not None:
-            print("\tResponse with cached reply package")
-            server_socket.sendto(reply.pack(), client_address)
-        else:
-            if rd == 0:
-                # RD = 0, send root servers (auth, ar) back.
-                print("\tResponse with root server information")
-                reply = query.reply()
-                [reply.add_auth(rr) for rr in root_auth]
-                [reply.add_ar(rr) for rr in root_ar]
+            reply = cache.read_cache(query)
+            if reply is not None:
+                print("\tResponse with cached reply package")
+                server_socket.sendto(reply.pack(), client_address)
             else:
-                # RD = 1, perform iterative query at server.
-                upstream_resp = iter_query(query)
-                reply = query.reply()
-                [reply.add_answer(rr) for rr in upstream_resp.rr]
-                [reply.add_auth(rr) for rr in upstream_resp.auth]
-                [reply.add_ar(rr) for rr in upstream_resp.ar]
-                cache.write_cache(reply)
-            server_socket.sendto(reply.pack(), client_address)
+                if rd == 0:
+                    # RD = 0, send root servers (auth, ar) back.
+                    print("\tResponse with root server information")
+                    reply = query.reply()
+                    [reply.add_auth(rr) for rr in root_auth]
+                    [reply.add_ar(rr) for rr in root_ar]
+                else:
+                    # RD = 1, perform iterative query at server.
+                    upstream_resp = iter_query(query)
+                    a_answers = [rr for rr in upstream_resp.rr if rr.rtype == QTYPE.A]
+                    cname_answers = [rr for rr in upstream_resp.rr if rr.rtype == QTYPE.CNAME]
+                    # If A query only have CNAME response, server should help to parse CNAME, too.
+                    if query.q.qtype == QTYPE.A and a_answers == [] and cname_answers:
+                        for c in cname_answers:
+                            qname = c.rdata.toZone()
+                            new_query = DNSRecord(header=query.header)
+                            new_query.add_question(DNSQuestion(qname))
+                            try:
+                                upstream_resp = iter_query(new_query)
+                                break
+                            except:
+                                continue
+                    reply = query.reply()
+                    if query.q.qtype == QTYPE.A and a_answers == [] and cname_answers:
+                        [reply.add_answer(rr) for rr in cname_answers]
+                    [reply.add_answer(rr) for rr in upstream_resp.rr]
+                    [reply.add_auth(rr) for rr in upstream_resp.auth]
+                    [reply.add_ar(rr) for rr in upstream_resp.ar]
+                    cache.write_cache(reply)
+                server_socket.sendto(reply.pack(), client_address)
+        except Exception as e:
+            print(e)
+            continue
 
 
 def iter_query(query):
